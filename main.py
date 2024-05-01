@@ -1,10 +1,3 @@
-import carla
-import math
-import random
-import queue
-import cv2
-import numpy as np
-
 from Agent.Agent import Agent
 from Environment.Environment import Environment
 
@@ -15,7 +8,7 @@ from Environment.Environment import Environment
 
 # def main():
 #     try:
-#         client = carla.Client("localhost", 2000)
+#         client = carla.Client("192.168.168.15", 2000)
 #         client.set_timeout(20.0)
 #         world = client.get_world()
 #         bpLib = world.get_blueprint_library()
@@ -23,8 +16,8 @@ from Environment.Environment import Environment
 
 #         vehicleBp = bpLib.find("vehicle.lincoln.mkz_2020")
 #         vehicle = world.try_spawn_actor(vehicleBp, random.choice(spawnPoints))
-#         # vehicle.set_autopilot(True)
-#         agent = Agent(vehicle)
+#         vehicle.set_autopilot(True)
+#         # agent = Agent(vehicle)
 #         spectator = world.get_spectator()
         
 #         cameraQueue = queue.Queue()
@@ -64,7 +57,8 @@ from Environment.Environment import Environment
 def main():
     try:
         agent = Agent()
-        env = Environment(agent)
+        # env = Environment(agent, ip="192.168.168.13")
+        env = Environment(agent, ip="localhost")
         env.runOneEpisode()
     except KeyboardInterrupt:
         env.onDisconnect()
