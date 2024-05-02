@@ -7,6 +7,31 @@ import numpy as np
 from Controller.PIDLongitudinalController import PIDLongitudinalController
 from Agent.Agent import Agent
 
+def getCorrectYaw(x):
+    return (((x % 360) + 360) % 360)
+
+# 得到[與waypoint的角度差, 與waypoint的距離, collision]
+def getRewardArgs(vehicle: carla.Vehicle, waypoint: carla.Waypoint):
+    vehicleLocation = vehicle.get_location()
+    xWaypoint = waypoint.transform.location.x
+    yWaypoint = waypoint.transform.location.y
+    xVehicle = vehicleLocation.x
+    yVehicle = vehicleLocation.y
+    
+    wpArray = np.array([xWaypoint, yWaypoint])
+    vehicleArray = np.array([xVehicle, yVehicle])
+    
+    dis = np.linalg.norm(wpArray - vehicleArray)
+    
+    vehicleYaw = getCorrectYaw(vehicle.get_transform().rotation.yaw)
+    wpYaw = getCorrectYaw(waypoint.transform.rotation.yaw)
+    
+    cosYawDiff = np.cos((vehicleYaw - wpYaw) * np.pi / 180.0)
+    return cosYawDiff, dis
+
+def getRewardValue(cosYawDiff: float, dis: float, collision: int, lambda1 = 1, lambda2 = 1, lambda3 = 10):
+    return (lambda1 * cosYawDiff) - (lambda2 * dis) - (lambda3 * collision)
+
 class Environment:
     def __init__(
         self, 
@@ -14,10 +39,13 @@ class Environment:
         isOpenOpenCVWindow = True,
         ip = "localhost",
         port = 2000,
-        timeout = 20.0
+        timeout = 20.0,
+        fps = 30
     ):
         self.agent = agent
         self.isOpenOpenCVWindow = isOpenOpenCVWindow
+        self.fps = fps
+        
         self.client = carla.Client(ip, port)
         self.client.set_timeout(timeout)
         self.world = self.client.get_world()
@@ -58,33 +86,49 @@ class Environment:
         
     def detectCollision(self):
         try:
-            print(self.collisionsQueue.get(block=False))
+            return self.collisionsQueue.get(block=False)
         except queue.Empty:
-            return
+            return None
     
     def showOpenCVWindow(self, carlaImg: carla.Image):
         img = np.reshape(np.copy(carlaImg.raw_data), (carlaImg.height, carlaImg.width, 4))
         img = cv2.resize(img, (320, 320))
         cv2.imshow("Img", img)
         cv2.waitKey(1)
-        
-    def runOneEpisode(self):
-        self.setAgentAndSensor()
-        # 設定world用sync mode
+
+    # 設定world用sync mode
+    def setWorldSync(self):
         settings = self.world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = 0.01
+        settings.fixed_delta_seconds = 1.0 / self.fps
         self.world.apply_settings(settings)
+
+    
+    def runOneEpisode(self):
+        self.setAgentAndSensor()
         
-        spectator = self.world.get_spectator()
+        self.setWorldSync()
+        
+        # spectator = self.world.get_spectator()
         
         while (True):
-            self.agent.speedController.getControl(40.0, self.agent.control)
+            self.agent.speedController.getControl(30.0, self.agent.control)
             self.agent.update()
 
             self.world.tick()
             if (self.isOpenOpenCVWindow):
                 self.showOpenCVWindow(self.imageQueue.get())
-            self.detectCollision()
-            transform = carla.Transform(self.agent.vehicle.get_transform().transform(carla.Location(x = -4, z = 2.5)), self.agent.vehicle.get_transform().rotation)
-            spectator.set_transform(transform)
+            isCollision = 0 if (self.detectCollision() == None) else 1
+            # transform = carla.Transform(self.agent.vehicle.get_transform().transform(carla.Location(x = -4, z = 2.5)), self.agent.vehicle.get_transform().rotation)
+            # spectator.set_transform(transform)
+            agentLocation = self.agent.vehicle.get_location()
+            waypoint = self.world.get_map().get_waypoint(agentLocation, project_to_road=True)
+            # print(waypoint.lane_type)
+            
+            cosYawDiff, dis = getRewardArgs(self.agent.vehicle, waypoint)
+            reward = getRewardValue(cosYawDiff, dis, isCollision)
+            # print(cosYawDiff, dis)
+            print(reward)
+            
+            if (isCollision == 1):
+                break

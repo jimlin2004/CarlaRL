@@ -1,0 +1,1 @@
+learningRate = 0.01

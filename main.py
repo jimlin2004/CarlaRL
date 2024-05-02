@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 from Agent.Agent import Agent
 from Environment.Environment import Environment
 
@@ -54,14 +56,24 @@ from Environment.Environment import Environment
 #     except KeyboardInterrupt:
 #         print("結束")
 
+def enableGPU():
+    gpus = tf.config.list_physical_devices("GPU")
+    tf.config.experimental.set_visible_devices(gpus[0], "GPU")
+    tf.config.experimental.set_memory_growth(gpus[0], True)
+
 def main():
     try:
-        agent = Agent()
-        # env = Environment(agent, ip="192.168.168.13")
-        env = Environment(agent, ip="localhost")
-        env.runOneEpisode()
+        enableGPU()
+        
+        # agent = Agent()
+        # # env = Environment(agent, ip="192.168.168.13")
+        # env = Environment(agent, ip="localhost")
+        # env.runOneEpisode()
+        
+        # env.onDisconnect()
+        # print("結束")
     except KeyboardInterrupt:
-        env.onDisconnect()
+        # env.onDisconnect()
         print("結束")
 
 
