@@ -6,9 +6,20 @@ import numpy as np
 
 from Controller.PIDLongitudinalController import PIDLongitudinalController
 from Agent.Agent import Agent
+from NeuralNetwork.DQN import DQN
 
 def getCorrectYaw(x):
     return (((x % 360) + 360) % 360)
+
+def processImg(carlaImg: carla.Image, shape) -> cv2.Mat:
+    img = np.reshape(np.copy(carlaImg.raw_data), (carlaImg.height, carlaImg.width, 4))
+    img = cv2.resize(img, shape)
+    return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+def processImgToAI(img: np.ndarray):
+    img = img / 255.0
+    imgData = np.reshape(img, (1, img.shape[0], img.shape[1], 1))
+    return imgData
 
 # 得到[與waypoint的角度差, 與waypoint的距離, collision]
 def getRewardArgs(vehicle: carla.Vehicle, waypoint: carla.Waypoint):
@@ -29,8 +40,8 @@ def getRewardArgs(vehicle: carla.Vehicle, waypoint: carla.Waypoint):
     cosYawDiff = np.cos((vehicleYaw - wpYaw) * np.pi / 180.0)
     return cosYawDiff, dis
 
-def getRewardValue(cosYawDiff: float, dis: float, collision: int, lambda1 = 1, lambda2 = 1, lambda3 = 10):
-    return (lambda1 * cosYawDiff) - (lambda2 * dis) - (lambda3 * collision)
+def getRewardValue(cosYawDiff: float, dis: float, isCollision: int, isFall: int, lambda1 = 1, lambda2 = 1, lambda3 = 10, lambda4 = 10):
+    return (lambda1 * cosYawDiff) - (lambda2 * dis) - (lambda3 * isCollision) - (lambda4 * isFall)
 
 class Environment:
     def __init__(
@@ -53,6 +64,12 @@ class Environment:
         self.spawnPoints = self.world.get_map().get_spawn_points()
         self.imageQueue = queue.Queue()
         self.collisionsQueue = queue.Queue()
+        
+        self.trainCnt = 0
+        self.trainFreq = 10
+        
+        self.totalReward = 0
+        self.logFreq = 200
 
     def setAgentAndSensor(self):
         vehicleBp = self.bpLib.find("vehicle.lincoln.mkz_2020")
@@ -90,9 +107,7 @@ class Environment:
         except queue.Empty:
             return None
     
-    def showOpenCVWindow(self, carlaImg: carla.Image):
-        img = np.reshape(np.copy(carlaImg.raw_data), (carlaImg.height, carlaImg.width, 4))
-        img = cv2.resize(img, (320, 320))
+    def showOpenCVWindow(self, img: cv2.Mat):
         cv2.imshow("Img", img)
         cv2.waitKey(1)
 
@@ -103,32 +118,68 @@ class Environment:
         settings.fixed_delta_seconds = 1.0 / self.fps
         self.world.apply_settings(settings)
 
+    def log(self):
+        print(f"[AVG] Reward: {self.totalReward / self.logFreq}")
+        self.totalReward = 0
     
-    def runOneEpisode(self):
+    def runOneEpisode(self, model: DQN, actionMap, episode: int):
+        # 當輪reward總和
+        turnReward = 0
+        
         self.setAgentAndSensor()
         
         self.setWorldSync()
         
         # spectator = self.world.get_spectator()
+        # 拿到當前state(img)
+        self.world.tick()
+        carlaImg = self.imageQueue.get()
+        img = processImg(carlaImg, (128, 128))
+        nextState = processImgToAI(img)
         
         while (True):
-            self.agent.speedController.getControl(30.0, self.agent.control)
-            self.agent.update()
+            self.trainCnt += 1
+            state = nextState
+            takenAction = model.selectAction(state)
+            action = actionMap[takenAction]
 
+            # self.agent.speedController.getControl(action[1], self.agent.control)
+            self.agent.speedController.getControl(20, self.agent.control)
+            # self.agent.control.steer = action[0]
+            self.agent.control.steer = action
+            self.agent.update()
+            
             self.world.tick()
+            carlaImg = self.imageQueue.get()
+            img = processImg(carlaImg, (128, 128))
             if (self.isOpenOpenCVWindow):
-                self.showOpenCVWindow(self.imageQueue.get())
+                self.showOpenCVWindow(img)
+            nextState = processImgToAI(img)
+            
             isCollision = 0 if (self.detectCollision() == None) else 1
+            
             # transform = carla.Transform(self.agent.vehicle.get_transform().transform(carla.Location(x = -4, z = 2.5)), self.agent.vehicle.get_transform().rotation)
             # spectator.set_transform(transform)
             agentLocation = self.agent.vehicle.get_location()
+            isFall = 0 if (agentLocation.z > -5) else 1
             waypoint = self.world.get_map().get_waypoint(agentLocation, project_to_road=True)
-            # print(waypoint.lane_type)
             
             cosYawDiff, dis = getRewardArgs(self.agent.vehicle, waypoint)
-            reward = getRewardValue(cosYawDiff, dis, isCollision)
-            # print(cosYawDiff, dis)
-            print(reward)
+            reward = getRewardValue(cosYawDiff, dis, isCollision, isFall)
             
-            if (isCollision == 1):
+            turnReward += reward
+            
+            done = (isCollision == 1 or isFall == 1)
+            
+            model.replayBuffer.push(state, takenAction, nextState, reward, done)
+            
+            if (self.trainCnt % self.trainFreq == 0):
+                model.train()
+            
+            if (done):
                 break
+
+        print(f"[episode] Reward: {turnReward}")
+        self.totalReward += turnReward
+        if (episode % self.logFreq == 0):
+            self.log()

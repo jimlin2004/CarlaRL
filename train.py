@@ -10,14 +10,16 @@ def enableGPU():
     tf.config.experimental.set_visible_devices(gpus[0], "GPU")
     tf.config.experimental.set_memory_growth(gpus[0], True)
 
-def main():
+def train():
     try:
         enableGPU()
         agent = Agent()
         # # env = Environment(agent, ip="192.168.168.13")
         env = Environment(agent, ip="localhost")
-        model = DQN(len(actionMap))
-        env.runOneEpisode(model, actionMap)
+        model = DQN(len(actionMap), lr = learningRate)
+        for episode in range(1, episodes + 1):
+            env.runOneEpisode(model, actionMap, episode)
+            env.reset()
         
         env.onDisconnect()
         print("結束")
@@ -27,4 +29,4 @@ def main():
 
 
 if (__name__ == "__main__"):
-    main()
+    train()

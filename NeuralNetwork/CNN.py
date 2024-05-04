@@ -1,9 +1,9 @@
 import tensorflow as tf
 
 class CNN(tf.keras.Model):
-    def __init__(self, actionsNum):
+    def __init__(self, actionsNum, inputShape):
         super(CNN, self).__init__()
-        self.conv1 = tf.keras.layers.Conv2D(filters=32, kernel_size=(8, 8), strides=4)
+        self.conv1 = tf.keras.layers.Conv2D(filters=32, kernel_size=(8, 8), strides=4, input_shape=inputShape)
         self.conv1_bnor = tf.keras.layers.BatchNormalization()
         self.conv1Relu = tf.keras.layers.ReLU()
         
@@ -21,9 +21,7 @@ class CNN(tf.keras.Model):
         self.den1Relu = tf.keras.layers.ReLU()
         self.den2 = tf.keras.layers.Dense(64)
         self.den2Relu = tf.keras.layers.ReLU()
-        self.den3 = tf.keras.layers.Dense(32)
-        self.den3Relu = tf.keras.layers.ReLU()
-        self.out = tf.keras(actionsNum)
+        self.out = tf.keras.layers.Dense(actionsNum)
         
     def call(self, Input):
         x = self.conv1(Input)
@@ -45,9 +43,6 @@ class CNN(tf.keras.Model):
         
         x = self.den2(x)
         x = self.den2Relu(x)
-        
-        x = self.den3(x)
-        x = self.den3Relu(x)
         
         Out = self.out(x)
         return Out
