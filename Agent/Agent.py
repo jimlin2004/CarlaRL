@@ -14,12 +14,16 @@ class Agent:
         self.vehicle = None
         self.camera = None
         self.collisionSensor = None
+        # self.laneSensor = None
         self.speedController = None
 
     def reset(self):
-        self.vehicle.destroy()
-        self.camera.destroy()
-        self.collisionSensor.destroy()
+        try:
+            self.vehicle.destroy()
+            self.camera.destroy()
+            self.collisionSensor.destroy()
+        except:
+            return
 
     def update(self):
         self.vehicle.apply_control(self.control)

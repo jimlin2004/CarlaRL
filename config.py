@@ -14,7 +14,7 @@ actionMap = {
     i: action for i, action in enumerate(steerActions)
 }
 
-learningRate = 0.01
-batchSize = 16
-stateShpae = (128, 128)
-episodes = 1000
+LearningRate = 0.01
+BatchSize = 64
+StateShpae = (128, 128)
+Episodes = 1000

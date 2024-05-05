@@ -7,18 +7,21 @@ from NeuralNetwork.ReplayBuffer import RelplayBuffer
 class DQN:
     def __init__(self, 
                 actionsNum,
-                targetUpdateFrequency = 200,
+                targetUpdateFrequency = 1000,
                 initEpsilon = 1,
                 endEpsilon = 0.05,
-                epsilonDecay = 0.9995,
+                epsilonDecay = 0.995,
                 gamma = 0.95,
                 lr = 0.01,
                 batchSize = 8
         ):
+        lrSchedule = tf.optimizers.schedules.ExponentialDecay(
+            lr, decay_steps=5000, decay_rate=0.96, staircase=True
+        )
         # Q network
         self.Q = CNN(actionsNum=actionsNum, inputShape=(128, 128, 1))
         self.Q_target = CNN(actionsNum=actionsNum, inputShape=(128, 128, 1))
-        self.Q_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        self.Q_optimizer = tf.keras.optimizers.SGD(learning_rate=lrSchedule, clipvalue=0.5)
         self.actionsNum = actionsNum
         # 衰減因子
         self.gamma = gamma
@@ -33,10 +36,12 @@ class DQN:
         self.iterations = 0
         
         self.replayBuffer = RelplayBuffer((128, 128, 1), batchSize=batchSize, bufferSize=10000)
-    def selectAction(self, state: np.ndarray):
-        currEps = self.eps
+    
+    def updateEps(self):
         self.eps = max(self.eps * self.epsilonDecay, self.endEpsilon)
-        if (np.random.uniform(0, 1) > currEps):
+        
+    def selectAction(self, state: np.ndarray):
+        if (np.random.uniform(0, 1) > self.eps):
             self.Q.trainable = False
             return np.argmax(self.Q(state, training = False))
         else:
@@ -59,3 +64,5 @@ class DQN:
         self.iterations += 1
         if (self.iterations % self.targetUpdateFrequency == 0):
             self.Q_target.set_weights(self.Q.get_weights())
+        
+        return np.mean(Q_loss)

@@ -1,4 +1,7 @@
 import tensorflow as tf
+import numpy as np
+import csv
+import datetime
 
 from Agent.Agent import Agent
 from Environment.Environment import Environment
@@ -15,11 +18,20 @@ def train():
         enableGPU()
         agent = Agent()
         # # env = Environment(agent, ip="192.168.168.13")
-        env = Environment(agent, ip="localhost")
-        model = DQN(len(actionMap), lr = learningRate)
-        for episode in range(1, episodes + 1):
-            env.runOneEpisode(model, actionMap, episode)
-            env.reset()
+        env = Environment(agent, BatchSize, True, ip="localhost")
+        model = DQN(len(actionMap), lr = LearningRate, batchSize=BatchSize)
+        
+        with open(f"./trainingHistroy/trainHistory_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.csv", "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for episode in range(1, Episodes + 1):
+                print(f"Current eps: {model.eps}")
+                turnReward, runTime = env.runOneEpisode(model, actionMap, episode)
+                print(f"Loss: {np.mean(env.lossList)}")
+                writer.writerow([episode, turnReward, np.mean(env.lossList), runTime])
+                env.lossList.clear()
+                env.reset()
+                model.updateEps()
+            
         
         env.onDisconnect()
         print("結束")
