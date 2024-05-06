@@ -9,10 +9,10 @@ class RelplayBuffer:
         self.currSize = 0
         
         self.state = np.zeros((self.maxSize, ) + stateDim)
-        self.action = np.zeros((self.maxSize, 1))
+        self.action = np.zeros(self.maxSize, dtype=np.int32)
         self.nextState = np.array(self.state)
-        self.reward = np.zeros((self.maxSize, 1))
-        self.done = np.zeros((self.maxSize, 1))
+        self.reward = np.zeros(self.maxSize)
+        self.done = np.zeros(self.maxSize)
         
     def push(self, state, action, nextState, reward, done):
         self.state[self.ptr] = state

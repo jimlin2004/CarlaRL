@@ -17,4 +17,4 @@ actionMap = {
 LearningRate = 0.01
 BatchSize = 64
 StateShpae = (128, 128)
-Episodes = 1000
+Episodes = 500

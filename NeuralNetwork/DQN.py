@@ -34,6 +34,7 @@ class DQN:
         self.epsilonDecay = epsilonDecay
         
         self.iterations = 0
+        self.batchSize = batchSize
         
         self.replayBuffer = RelplayBuffer((128, 128, 1), batchSize=batchSize, bufferSize=10000)
     
@@ -51,13 +52,23 @@ class DQN:
         self.Q.trainable = True
         
         state, action, nextState, reward, done = self.replayBuffer.sample()
-        
-        # with tf.stop_gradient() as stopGrad:
-        targetQ = reward + (1 - done) * self.gamma * tf.reduce_max(self.Q_target(nextState, training = False), axis=1, keepdims=True)
+        # targetQ = reward + (1 - done) * self.gamma * tf.reduce_max(self.Q_target(nextState, training = False), axis=1, keepdims=True)
+        # with tf.GradientTape() as tape:
+        #     currentQ = tf.gather(self.Q(state, training=True), np.asarray(action, dtype=np.int32), batch_dims=1)
+        #     # 計算loss
+        #     Q_loss = tf.losses.huber(targetQ, currentQ)
+        # gradientsOfQ = tape.gradient(Q_loss, self.Q.trainable_variables)
+        # self.Q_optimizer.apply_gradients(zip(gradientsOfQ, self.Q.trainable_variables))
         with tf.GradientTape() as tape:
-            currentQ = tf.gather(self.Q(state, training=True), np.asarray(action, dtype=np.int32), batch_dims=1)
-            # 計算loss
-            Q_loss = tf.losses.huber(targetQ, currentQ)
+            Q_eval = self.Q(state, training = True)
+            Q_target = Q_eval.numpy()
+            Q_next = self.Q_target(nextState, training = False)
+            Q_next = Q_next.numpy()
+            index = np.arange(self.batchSize, dtype=np.int32)
+            
+            # 進行DQN公式
+            Q_target[index, action] = reward + (1 - done) * self.gamma * np.max(Q_next, axis = 1)
+            Q_loss = tf.keras.losses.huber(Q_target, Q_eval)
         gradientsOfQ = tape.gradient(Q_loss, self.Q.trainable_variables)
         self.Q_optimizer.apply_gradients(zip(gradientsOfQ, self.Q.trainable_variables))
         

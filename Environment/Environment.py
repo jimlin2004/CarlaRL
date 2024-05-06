@@ -75,10 +75,10 @@ class Environment:
         self.collisionsQueue = queue.Queue()
         # self.laneQueue = queue.Queue()
         
-        self.maxDisFormWaypoint = 2.5
+        self.maxDisFormWaypoint = 2.0
         
         self.trainCnt = 0
-        self.trainFreq = 4
+        self.trainFreq = 1
         
         self.totalReward = 0
         self.saveFreq = 100

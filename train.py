@@ -31,7 +31,7 @@ def train():
                 env.lossList.clear()
                 env.reset()
                 model.updateEps()
-            
+                
         
         env.onDisconnect()
         print("結束")
