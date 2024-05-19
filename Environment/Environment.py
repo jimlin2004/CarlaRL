@@ -4,10 +4,13 @@ import queue
 import cv2
 import numpy as np
 import time
+import copy
+from scipy.spatial import KDTree
 
 from Controller.PIDLongitudinalController import PIDLongitudinalController
 from Agent.Agent import Agent
 from NeuralNetwork.DQN import DQN
+from agents.navigation.global_route_planner import GlobalRoutePlanner
 
 def getCorrectYaw(x):
     return (((x % 360) + 360) % 360)
@@ -84,10 +87,15 @@ class Environment:
         self.saveFreq = 100
         
         self.lossList = []
+        
+        self.waypointsMp = {}
+        self.kdTreeMp = {}
+        self.processWaypoints()
 
     def setAgentAndSensor(self):
         vehicleBp = self.bpLib.find("vehicle.lincoln.mkz_2020")
-        self.agent.vehicle = self.world.try_spawn_actor(vehicleBp, random.choice(self.spawnPoints))
+        selectedSpawnPoints = random.choice(self.spawnPoints)
+        self.agent.vehicle = self.world.try_spawn_actor(vehicleBp, selectedSpawnPoints)
         
         # agent的camera設定
         self.imageQueue.queue.clear()
@@ -108,6 +116,8 @@ class Environment:
         
         # agent的PID controller設定
         self.agent.speedController = PIDLongitudinalController(self.agent.vehicle)
+        
+        return selectedSpawnPoints
 
     def reset(self):
         self.agent.reset()
@@ -145,19 +155,71 @@ class Environment:
     def log(self):
         print(f"[AVG] Reward: {self.totalReward / self.saveFreq}")
         self.totalReward = 0
+        
+    def processWaypoints(self):
+        allWaypoints = self.world.get_map().generate_waypoints(0.2)
+        size = len(allWaypoints)
+        for i in range(0, size):
+            if (allWaypoints[i].lane_id not in self.waypointsMp):
+                self.waypointsMp[allWaypoints[i].lane_id] = [allWaypoints[i]]
+            else:
+                self.waypointsMp[allWaypoints[i].lane_id].append(allWaypoints[i])
+        for key in self.waypointsMp.keys():
+            wpLocations = []
+            size = len(self.waypointsMp[key])
+            wps = copy.copy(self.waypointsMp[key])
+            for i in range(0, size):
+                wpLocations.append([wps[i].transform.location.x, wps[i].transform.location.y])
+            self.kdTreeMp[key] = KDTree(wpLocations)
+        
+    def runAutopilotEnv(self):
+        spawnPoint = self.setAgentAndSensor()
+        
+        originWp = self.world.get_map().get_waypoint(self.agent.vehicle.get_location(), project_to_road=True)
+        
+        # wps = copy.copy(self.waypointsMp[originWp.lane_id])
+        kdTree = copy.copy(self.kdTreeMp[originWp.lane_id])
+        
+        self.setWorldSync()
+        self.agent.vehicle.set_autopilot(True)
+        
+        spectator = self.world.get_spectator()
+            
+        index = 0
+        while (True):
+            self.agent.speedController.getControl(20, self.agent.control)
+            self.agent.update()
+            
+            self.world.tick()
+            carlaImg = self.imageQueue.get()
+            img = processImg(carlaImg, (128, 128))
+            if (self.isOpenOpenCVWindow):
+                self.showOpenCVWindow(img)
+            nextState = processImgToAI(img)
+            
+            vehicleLocation = self.agent.vehicle.get_location()
+            print(kdTree.query([vehicleLocation.x, vehicleLocation.y]))
+            # isCollision = 0 if (self.detectCollision() == None) else 1
+            
+            # # transform = carla.Transform(self.agent.vehicle.get_transform().transform(carla.Location(x = -4, z = 2.5)), self.agent.vehicle.get_transform().rotation)
+            # transform = wps[index].transform
+            # transform.location.z = 2.5
+            # spectator.set_transform(transform)
+            
+            # index = (index + 1) % len(wps)
+            # agentLocation = self.agent.vehicle.get_location()
+            # isFall = 0 if (agentLocation.z > -5) else 1
     
     def runOneEpisode(self, model: DQN, actionMap, episode: int):
         # 當輪reward總和
         turnReward = 0
         
         self.setAgentAndSensor()
-        
         self.setWorldSync()
         
         # spectator = self.world.get_spectator()
         # 拿到當前state(img)
         
-        # self.agent.vehicle.set_autopilot(True)
         # 讓車子先著地
         prevZ = self.agent.vehicle.get_location().z
         while (1):
@@ -172,10 +234,13 @@ class Environment:
             prevZ = currZ
             
         originWaypoint = self.world.get_map().get_waypoint(self.agent.vehicle.get_location(), project_to_road=True)
-        allWaypoins = originWaypoint.next_until_lane_end(0.2)
+        
+        wps = copy.copy(self.waypointsMp[originWaypoint.lane_id])
+        kdTree = copy.copy(self.kdTreeMp[originWaypoint.lane_id])
+        # allWaypoins = originWaypoint.next_until_lane_end(0.2)
         startTime = time.time()
         currTime = 0
-        
+        # self.agent.vehicle.set_autopilot(True)
         while (True):
             self.trainCnt += 1
             state = nextState
@@ -183,9 +248,7 @@ class Environment:
             takenAction = model.selectAction(state)
             action = actionMap[takenAction]
 
-            # # self.agent.speedController.getControl(action[1], self.agent.control)
             self.agent.speedController.getControl(20, self.agent.control)
-            # self.agent.control.steer = actionMap[5]
             self.agent.control.steer = action
             
             self.agent.update()
@@ -200,19 +263,10 @@ class Environment:
             # isLaneInvert = 0 if (self.detectLaneInversion() == None) else 1
             isCollision = 0 if (self.detectCollision() == None) else 1
             
-            # transform = carla.Transform(self.agent.vehicle.get_transform().transform(carla.Location(x = -4, z = 2.5)), self.agent.vehicle.get_transform().rotation)
-            # spectator.set_transform(transform)
             agentLocation = self.agent.vehicle.get_location()
             isFall = 0 if (agentLocation.z > -5) else 1
             
-            # waypoint = self.world.get_map().get_waypoint(agentLocation, project_to_road=True)
-            currClosestDiff = 0x3f3f3f3f
-            closestPoint = None
-            for wp in allWaypoins:
-                dis = agentLocation.distance(wp.transform.location)
-                if (dis < currClosestDiff):
-                    currClosestDiff = dis
-                    closestPoint = wp
+            closestPoint = wps[kdTree.query([agentLocation.x, agentLocation.y])[1]]
             
             # cosYawDiff, dis = getRewardArgs(self.agent.vehicle, waypoint)
             cosYawDiff, dis = getRewardArgs(self.agent.vehicle, closestPoint)
@@ -223,17 +277,19 @@ class Environment:
             
             # 道路有終點
             if (self.isTheWayWillEnd):
-                if (closestPoint == allWaypoins[-1]):
+                if (closestPoint == wps[-1]):
                     done = True
             model.replayBuffer.push(state, takenAction, nextState, reward, done)
-            
+            # if (isCollision):
+                # print("撞到了")
+            # print(reward)
             if ((self.trainCnt >= self.batchSize) and (self.trainCnt % self.trainFreq == 0)):
                 loss = model.train()
                 self.lossList.append(loss)
             
             currTime = time.time()
-            # 超過30秒
-            if (currTime - startTime >= 30):
+            # 超過60秒
+            if (currTime - startTime >= 60):
                 done = True
             if (done):
                 break

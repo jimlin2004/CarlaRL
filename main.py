@@ -12,16 +12,20 @@ def enableGPU():
 
 def main():
     try:
-        enableGPU()
+        # enableGPU()
         agent = Agent()
         # # env = Environment(agent, ip="192.168.168.13")
-        env = Environment(agent, ip="localhost")
-        model = DQN(len(actionMap))
-        env.runOneEpisode(model, actionMap)
+        env = Environment(agent, BatchSize, False, ip="localhost")
+        model = DQN(len(actionMap), lr = LearningRate, batchSize=BatchSize)
+        # for episode in range(1, Episodes + 1):
+        #     env.runOneEpisode(model, actionMap, episode)
+        #     env.reset()
+        env.runAutopilotEnv()
         
         env.onDisconnect()
         print("結束")
     except KeyboardInterrupt:
+        env.reset()
         env.onDisconnect()
         print("結束")
 
