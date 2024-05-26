@@ -15,10 +15,13 @@ from agents.navigation.global_route_planner import GlobalRoutePlanner
 def getCorrectYaw(x):
     return (((x % 360) + 360) % 360)
 
-def processImg(carlaImg: carla.Image, shape) -> cv2.Mat:
+# carla image to opencv img
+def carlaImg2CVMat(carlaImg: carla.Image) -> cv2.Mat:
     img = np.reshape(np.copy(carlaImg.raw_data), (carlaImg.height, carlaImg.width, 4))
-    img = cv2.resize(img, shape)
     return img 
+
+def resizeImg(img: cv2.Mat, shape):
+    return cv2.resize(img, shape)
 
 def processImgToAI(img: np.ndarray):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -75,6 +78,7 @@ class Environment:
         self.bpLib = self.world.get_blueprint_library()
         self.spawnPoints = self.world.get_map().get_spawn_points()
         self.imageQueue = queue.Queue()
+        self.topImageQueue = queue.Queue()
         self.collisionsQueue = queue.Queue()
         # self.laneQueue = queue.Queue()
         
@@ -104,15 +108,17 @@ class Environment:
         self.agent.camera = self.world.spawn_actor(cameraBp, cameraTransform, attach_to = self.agent.vehicle)
         self.agent.camera.listen(lambda image: self.imageQueue.put(image))
         
+        self.topImageQueue.queue.clear()
+        topCameraTransform = carla.Transform(carla.Location(x = 0, z = 10), carla.Rotation(pitch=-90.0))
+        topCameraBp = self.bpLib.find("sensor.camera.rgb")
+        self.agent.topCamera = self.world.spawn_actor(topCameraBp, topCameraTransform, attach_to = self.agent.vehicle)
+        self.agent.topCamera.listen(lambda image: self.topImageQueue.put(image))
+        
         # agent的collision sensor設定
         self.collisionsQueue.queue.clear()
         collisionSensorBp = self.bpLib.find("sensor.other.collision")
         self.agent.collisionSensor = self.world.spawn_actor(collisionSensorBp, carla.Transform(), attach_to = self.agent.vehicle)
         self.agent.collisionSensor.listen(lambda event: self.collisionsQueue.put(event))
-        
-        # laneSensor = self.bpLib.find("sensor.other.lane_invasion")
-        # self.agent.laneSensor = self.world.spawn_actor(laneSensor, carla.Transform(), attach_to=self.agent.vehicle)
-        # self.agent.laneSensor.listen(lambda event: self.laneQueue.put(event))
         
         # agent的PID controller設定
         self.agent.speedController = PIDLongitudinalController(self.agent.vehicle)
@@ -134,15 +140,9 @@ class Environment:
             return self.collisionsQueue.get(block=False)
         except queue.Empty:
             return None
-        
-    # def detectLaneInversion(self):
-    #     try:
-    #         return self.laneQueue.get(block=False)
-    #     except queue.Empty:
-    #         return None
     
-    def showOpenCVWindow(self, img: cv2.Mat):
-        cv2.imshow("Img", img)
+    def showOpenCVWindow(self, img: cv2.Mat, windowName: str):
+        cv2.imshow(windowName, img)
         cv2.waitKey(1)
 
     # 設定world用sync mode
@@ -192,9 +192,10 @@ class Environment:
             
             self.world.tick()
             carlaImg = self.imageQueue.get()
-            img = processImg(carlaImg, (128, 128))
+            img_cv = carlaImg2CVMat(carlaImg)
             if (self.isOpenOpenCVWindow):
-                self.showOpenCVWindow(img)
+                self.showOpenCVWindow(img_cv, "camera")
+            img = resizeImg(img_cv, (128, 128))
             nextState = processImgToAI(img)
             
             vehicleLocation = self.agent.vehicle.get_location()
@@ -210,7 +211,7 @@ class Environment:
             # agentLocation = self.agent.vehicle.get_location()
             # isFall = 0 if (agentLocation.z > -5) else 1
     
-    def runOneEpisode(self, model: DQN, actionMap, episode: int):
+    def runOneEpisode(self, model: DQN, actionMap, episode: int, training = True):
         # 當輪reward總和
         turnReward = 0
         
@@ -225,8 +226,10 @@ class Environment:
         while (1):
             self.world.tick()
             currZ = self.agent.vehicle.get_location().z
+            carlaTopimg = self.topImageQueue.get()
             carlaImg = self.imageQueue.get()
-            img = processImg(carlaImg, (128, 128))
+            img_cv = carlaImg2CVMat(carlaImg)
+            img = resizeImg(img_cv, (128, 128))
             nextState = processImgToAI(img)
             
             if (currZ - prevZ >= 0):
@@ -245,7 +248,7 @@ class Environment:
             self.trainCnt += 1
             state = nextState
             
-            takenAction = model.selectAction(state)
+            takenAction = model.selectAction(state, training)
             action = actionMap[takenAction]
 
             self.agent.speedController.getControl(20, self.agent.control)
@@ -254,13 +257,23 @@ class Environment:
             self.agent.update()
             
             self.world.tick()
-            carlaImg = self.imageQueue.get()
-            img = processImg(carlaImg, (128, 128))
+            
+            carlaTopImg = self.topImageQueue.get()
+            topImg_cv = carlaImg2CVMat(carlaTopImg)
             if (self.isOpenOpenCVWindow):
-                self.showOpenCVWindow(img)
+                topImgHeight, topImgWidth = topImg_cv.shape[:2]
+                topImgAspectRatio = topImgWidth / topImgHeight
+                topImg_cv_resized = resizeImg(topImg_cv, (int(512 * topImgAspectRatio), 512))
+                self.showOpenCVWindow(topImg_cv_resized, "topCamera")
+            
+            carlaImg = self.imageQueue.get()
+            img_cv = carlaImg2CVMat(carlaImg)
+            if (self.isOpenOpenCVWindow):
+                img_cv_resized = resizeImg(img_cv, (512, 512))
+                self.showOpenCVWindow(img_cv_resized, "camera")
+            img = resizeImg(img_cv, (128, 128))
             nextState = processImgToAI(img)
             
-            # isLaneInvert = 0 if (self.detectLaneInversion() == None) else 1
             isCollision = 0 if (self.detectCollision() == None) else 1
             
             agentLocation = self.agent.vehicle.get_location()
@@ -279,11 +292,11 @@ class Environment:
             if (self.isTheWayWillEnd):
                 if (closestPoint == wps[-1]):
                     done = True
-            model.replayBuffer.push(state, takenAction, nextState, reward, done)
-            # if (isCollision):
-                # print("撞到了")
-            # print(reward)
-            if ((self.trainCnt >= self.batchSize) and (self.trainCnt % self.trainFreq == 0)):
+            
+            if (training):
+                model.replayBuffer.push(state, takenAction, nextState, reward, done)
+
+            if (training and (self.trainCnt >= self.batchSize) and (self.trainCnt % self.trainFreq == 0)):
                 loss = model.train()
                 self.lossList.append(loss)
             
@@ -296,7 +309,7 @@ class Environment:
 
         print(f"[episode {episode}] Reward: {turnReward}, time: {currTime - startTime}")
         self.totalReward += turnReward
-        if (episode % self.saveFreq == 0):
+        if (training and (episode % self.saveFreq == 0)):
             saveModel(model, episode)
             self.log()
         return turnReward, currTime - startTime

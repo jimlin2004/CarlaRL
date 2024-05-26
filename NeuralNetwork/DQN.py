@@ -38,10 +38,21 @@ class DQN:
         
         self.replayBuffer = RelplayBuffer((128, 128, 1), batchSize=batchSize, bufferSize=10000)
     
+    def setEps(self, newEps):
+        self.eps = newEps
+    
+    def loadWeight(self, path: str):
+        self.Q.load_weights(path).expect_partial()
+        self.Q_target.set_weights(self.Q.get_weights())
+    
     def updateEps(self):
         self.eps = max(self.eps * self.epsilonDecay, self.endEpsilon)
         
-    def selectAction(self, state: np.ndarray):
+    def selectAction(self, state: np.ndarray, training):
+        if (not training):
+            self.Q.trainable = False
+            return np.argmax(self.Q(state, training = False))
+        
         if (np.random.uniform(0, 1) > self.eps):
             self.Q.trainable = False
             return np.argmax(self.Q(state, training = False))

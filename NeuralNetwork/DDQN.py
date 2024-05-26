@@ -48,7 +48,11 @@ class DDQN:
     def updateEps(self):
         self.eps = max(self.eps * self.epsilonDecay, self.endEpsilon)
         
-    def selectAction(self, state: np.ndarray):
+    def selectAction(self, state: np.ndarray, training):
+        if (not training):
+            self.Q.trainable = False
+            return np.argmax(self.Q(state, training = False))
+        
         if (np.random.uniform(0, 1) > self.eps):
             self.Q.trainable = False
             return np.argmax(self.Q(state, training = False))
